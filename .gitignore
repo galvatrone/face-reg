@@ -1,0 +1,40 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual envs
+venv/
+env/
+.env
+.python-version
+
+# Models / weights
+models/
+*.h5
+*.pt
+*.pth
+weights.txt
+
+# Data, images
+faces/
+images/
+sound/
+*.mp4
+*.avi
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log

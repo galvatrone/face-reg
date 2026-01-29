@@ -1,0 +1,6 @@
+numpy>=1.21
+opencv-python
+dlib
+face_recognition
+Pillow
+scikit-learn
