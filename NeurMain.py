@@ -27,8 +27,8 @@ MODELS_DIR = os.path.join(PROJECT_DIR, "models")
 predictor_path = os.path.join(MODELS_DIR, "shape_predictor_68_face_landmarks.dat")
 rec_model_path = os.path.join(MODELS_DIR, "dlib_face_recognition_resnet_model_v1.dat")
 
-predictor = dlib.shape_predictor(predictor_path)
-face_rec_model = dlib.face_recognition_model_v1(rec_model_path)
+predictor = dlib.shape_predictor(predictor_path) # pyright: ignore[reportAttributeAccessIssue]
+face_rec_model = dlib.face_recognition_model_v1(rec_model_path) # pyright: ignore[reportAttributeAccessIssue]
 
 # Папка с базой и фотографиями
 BASE_FILE = os.path.join(PROJECT_DIR, "known_faces.pkl")
