@@ -208,7 +208,7 @@ def open_camera():
         # Linux/macOS: default backend, plus V4L2 when available
         candidates = [(0, None), (1, None)]
         if hasattr(cv2, "CAP_V4L2"):
-            candidates.extend([(0, cv2.CAP_V4L2), (1, cv2.CAP_V4L2)])
+            candidates.extend([(0, cv2.CAP_V4L2), (1, cv2.CAP_V4L2)])  # pyright: ignore[reportArgumentType]
 
     for index, backend in candidates:
         cap_try = cv2.VideoCapture(index) if backend is None else cv2.VideoCapture(index, backend)
@@ -258,7 +258,7 @@ while True:
             left *= 4
             scaled_locations.append((top, right, bottom, left))
 
-            rect = dlib.rectangle(left, top, right, bottom)
+            rect = dlib.rectangle(left, top, right, bottom) # pyright: ignore[reportAttributeAccessIssue]
             shape = predictor(frame, rect)
             descriptor = face_rec_model.compute_face_descriptor(frame, shape)
             face_encoding = np.array(descriptor)
