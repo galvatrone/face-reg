@@ -2,11 +2,11 @@ import cv2
 import pickle
 import numpy as np
 import os
-import dlib
 import uuid
 import platform
 import shutil
 import warnings
+import time
 
 warnings.filterwarnings(
     "ignore",
@@ -18,17 +18,6 @@ import face_recognition
 
 # Абсолютный путь к папке проекта
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Папка проекта и моделей
-
-MODELS_DIR = os.path.join(PROJECT_DIR, "models")
-
-
-predictor_path = os.path.join(MODELS_DIR, "shape_predictor_68_face_landmarks.dat")
-rec_model_path = os.path.join(MODELS_DIR, "dlib_face_recognition_resnet_model_v1.dat")
-
-predictor = dlib.shape_predictor(predictor_path) # pyright: ignore[reportAttributeAccessIssue]
-face_rec_model = dlib.face_recognition_model_v1(rec_model_path) # pyright: ignore[reportAttributeAccessIssue]
 
 # Папка с базой и фотографиями
 BASE_FILE = os.path.join(PROJECT_DIR, "known_faces.pkl")
@@ -53,6 +42,32 @@ def log_face_event(name, face_id, encoding, event_text, total_faces):
     with open(per_id_log, "a", encoding="utf-8") as f:
         f.write(log_text)
     print(f"[LOG] {event_text}: ID={face_id}, name={name}, total_ids={total_faces}")
+
+
+def log_visibility_event(name, face_id, event_text, duration_sec):
+    common_log = os.path.join(PROJECT_DIR, "log.txt")
+    per_id_log = os.path.join(LOGS_DIR, f"{face_id}.txt")
+    log_lines = [
+        f"{event_text}: {name} (ID: {face_id})",
+        f"Время в зоне видимости: {duration_sec:.1f} сек",
+        "-" * 80,
+    ]
+    log_text = "\n".join(log_lines) + "\n"
+
+    with open(common_log, "a", encoding="utf-8") as f:
+        f.write(log_text)
+    with open(per_id_log, "a", encoding="utf-8") as f:
+        f.write(log_text)
+    print(f"[LOG] {event_text}: ID={face_id}, name={name}, visible={duration_sec:.1f}s")
+
+
+def format_duration(seconds):
+    total = int(max(0, seconds))
+    minutes, secs = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
 
 
 
@@ -90,7 +105,13 @@ TRACK_MAX_MISSING_FRAMES = 30
 POSITION_IOU_THRESHOLD = 0.20
 POSITION_CENTER_RATIO_THRESHOLD = 0.45
 ENCODING_ADD_MIN_DISTANCE = 0.035
-ENCODING_ADD_COOLDOWN_FRAMES = 20
+ENCODING_ADD_COOLDOWN_FRAMES = 10
+DETECTION_FRAME_INTERVAL = 8
+DETECTION_SCALE = 0.20
+MAX_FACES_PER_FRAME = 2
+CAPTURE_WIDTH = 1280
+CAPTURE_HEIGHT = 720
+CAPTURE_FPS = 30
 
 
 def save_base():
@@ -224,11 +245,18 @@ cap = open_camera()
 if cap is None or not cap.isOpened():
     print("Не удалось открыть камеру (проверьте права доступа к /dev/video* и занятость устройства)")
     exit()
+# Единые настройки потока: нормальная картинка для вывода и меньше лагов.
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAPTURE_WIDTH)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAPTURE_HEIGHT)
+cap.set(cv2.CAP_PROP_FPS, CAPTURE_FPS)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 frame_count = 0
-scaled_locations, scaled_encodings = [], []
+active_faces = []
 recent_tracks = {}  # user_id -> {"bbox": (t, r, b, l), "last_seen_frame": int}
 last_encoding_add_frame = {}
+visibility_stats = {}  # user_id -> {"name": str, "total_sec": float, "visible_since": float|None, "last_seen_ts": float}
 
 print("[INFO] Нажми 'q' для выхода, 'w' — редактировать имя, 'd' — удалить лицо.")
 
@@ -242,97 +270,155 @@ while True:
     frame = cv2.flip(frame, 1)
     display_frame = frame.copy()
 
-    if frame_count % 10 == 0:
-        # Уменьшаем
-        small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-        rgb_small_frame = small_frame[:, :, ::-1]
-        face_locations = face_recognition.face_locations(rgb_small_frame, model="hog")
+    if frame_count % DETECTION_FRAME_INTERVAL == 0:
+        # Тяжёлую детекцию и сопоставление делаем раз в N кадров.
+        small_frame = cv2.resize(frame, (0, 0), fx=DETECTION_SCALE, fy=DETECTION_SCALE)
+        # dlib ожидает contiguous-массив; срез ::-1 даёт view с отрицательным stride.
+        rgb_small_frame = small_frame[:, :, ::-1].copy()
+        face_locations_small = face_recognition.face_locations(rgb_small_frame, model="hog")
+        if len(face_locations_small) > MAX_FACES_PER_FRAME:
+            face_locations_small = sorted(
+                face_locations_small,
+                key=lambda box: (box[2] - box[0]) * (box[1] - box[3]),
+                reverse=True,
+            )[:MAX_FACES_PER_FRAME]
+        face_encodings_small = face_recognition.face_encodings(
+            rgb_small_frame,
+            face_locations_small,
+            num_jitters=1,
+            model="small",
+        )
 
-        scaled_locations, scaled_encodings = [], []
+        active_faces = []
+        seen_known_ids_this_frame = set()
 
-        for top, right, bottom, left in face_locations:
-            # масштаб
-            top *= 4
-            right *= 4
-            bottom *= 4
-            left *= 4
-            scaled_locations.append((top, right, bottom, left))
+        for face_encoding, (top, right, bottom, left) in zip(face_encodings_small, face_locations_small):
+            # Масштабируем координаты обратно под исходный кадр.
+            scale_inv = 1.0 / DETECTION_SCALE
+            top = int(top * scale_inv)
+            right = int(right * scale_inv)
+            bottom = int(bottom * scale_inv)
+            left = int(left * scale_inv)
+            top = max(0, top)
+            left = max(0, left)
+            right = min(frame.shape[1], right)
+            bottom = min(frame.shape[0], bottom)
 
-            rect = dlib.rectangle(left, top, right, bottom) # pyright: ignore[reportAttributeAccessIssue]
-            shape = predictor(frame, rect)
-            descriptor = face_rec_model.compute_face_descriptor(frame, shape)
-            face_encoding = np.array(descriptor)
-            scaled_encodings.append(face_encoding)
+            name = "Unknown"
+            matched_id = None
+            current_box = (top, right, bottom, left)
+            face_img = frame[top:bottom, left:right]
+
+            if known_encodings:
+                distances = face_recognition.face_distance(known_encodings, face_encoding)
+                best_index = np.argmin(distances)
+
+                if distances[best_index] < FACE_MATCH_THRESHOLD:
+                    matched_id = known_ids[best_index]
+                    if matched_id in known_faces:
+                        name = known_faces[matched_id]["name"]
+
+            if matched_id is None:
+                # Если лицо только что пропадало и снова появилось рядом, считаем что это тот же ID.
+                fallback_id = find_recent_id_by_position(
+                    current_box,
+                    frame_count,
+                    recent_tracks,
+                    seen_known_ids_this_frame,
+                )
+                if fallback_id is not None:
+                    matched_id = fallback_id
+                    name = known_faces[fallback_id]["name"]
+                    added, added_path = try_add_encoding_to_existing(
+                        fallback_id,
+                        face_encoding,
+                        face_img,
+                        frame_count,
+                        last_encoding_add_frame,
+                    )
+                    if added:
+                        save_base()
+                        log_face_event(
+                            known_faces[fallback_id]["name"],
+                            fallback_id,
+                            face_encoding,
+                            "Дополнен ID",
+                            len(known_faces),
+                        )
+                        known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
+                        print(f"[INFO] Дополнен ID {fallback_id}: +encoding, фото {added_path}")
+                else:
+                    print("\n=== ДОБАВЛЕНИЕ НОВОГО ЛИЦА ===")
+                    new_id = str(uuid.uuid4())
+                    known_faces[new_id] = {
+                        "name": "Unknown",
+                        "encodings": [face_encoding]
+                    }
+                    face_path = save_face_image(new_id, face_img, primary=True)
+                    save_base()
+                    log_face_event("Unknown", new_id, face_encoding, "Добавлено лицо", len(known_faces))
+                    known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
+                    print(f"[INFO] Добавлено новое лицо: {new_id}, фото сохранено как {face_path}")
+                    matched_id = new_id
+
+            if matched_id is not None:
+                seen_known_ids_this_frame.add(matched_id)
+                recent_tracks[matched_id] = {"bbox": current_box, "last_seen_frame": frame_count}
+
+            active_faces.append(
+                {
+                    "box": current_box,
+                    "name": name,
+                    "id": matched_id,
+                }
+            )
 
     frame_count += 1
 
-    seen_known_ids_this_frame = set()
+    now_ts = time.time()
+    currently_visible_ids = {face_item["id"] for face_item in active_faces if face_item.get("id")}
+    for face_item in active_faces:
+        user_id = face_item.get("id")
+        if not user_id:
+            continue
+        stats = visibility_stats.setdefault(
+            user_id,
+            {
+                "name": face_item["name"],
+                "total_sec": 0.0,
+                "visible_since": None,
+                "last_seen_ts": 0.0,
+            },
+        )
+        stats["name"] = face_item["name"]
+        if stats["visible_since"] is None:
+            stats["visible_since"] = now_ts
+        stats["last_seen_ts"] = now_ts
 
-    for face_encoding, (top, right, bottom, left) in zip(scaled_encodings, scaled_locations):
-        name = "Unknown"
-        matched_id = None
-        current_box = (top, right, bottom, left)
-        face_img = frame[top:bottom, left:right]
+    for user_id, stats in visibility_stats.items():
+        if stats["visible_since"] is None:
+            continue
+        if user_id not in currently_visible_ids:
+            session_sec = now_ts - stats["visible_since"]
+            stats["total_sec"] += max(0.0, session_sec)
+            stats["visible_since"] = None
 
-        if known_encodings:
-            distances = face_recognition.face_distance(known_encodings, face_encoding)
-            best_index = np.argmin(distances)
-
-            if distances[best_index] < FACE_MATCH_THRESHOLD:
-                matched_id = known_ids[best_index]
-                if matched_id in known_faces:
-                    name = known_faces[matched_id]["name"]
-
-        if matched_id is None:
-            # Если лицо только что пропадало и снова появилось рядом, считаем что это тот же ID.
-            fallback_id = find_recent_id_by_position(
-                current_box,
-                frame_count,
-                recent_tracks,
-                seen_known_ids_this_frame,
-            )
-            if fallback_id is not None:
-                matched_id = fallback_id
-                name = known_faces[fallback_id]["name"]
-                added, added_path = try_add_encoding_to_existing(
-                    fallback_id,
-                    face_encoding,
-                    face_img,
-                    frame_count,
-                    last_encoding_add_frame,
-                )
-                if added:
-                    save_base()
-                    log_face_event(
-                        known_faces[fallback_id]["name"],
-                        fallback_id,
-                        face_encoding,
-                        "Дополнен ID",
-                        len(known_faces),
-                    )
-                    known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
-                    print(f"[INFO] Дополнен ID {fallback_id}: +encoding, фото {added_path}")
-            else:
-                print("\n=== ДОБАВЛЕНИЕ НОВОГО ЛИЦА ===")
-                new_id = str(uuid.uuid4())
-                known_faces[new_id] = {
-                    "name": "Unknown",
-                    "encodings": [face_encoding]
-                }
-                face_path = save_face_image(new_id, face_img, primary=True)
-                save_base()
-                log_face_event("Unknown", new_id, face_encoding, "Добавлено лицо", len(known_faces))
-                known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
-                print(f"[INFO] Добавлено новое лицо: {new_id}, фото сохранено как {face_path}")
-
-        if matched_id is not None:
-            seen_known_ids_this_frame.add(matched_id)
-            recent_tracks[matched_id] = {"bbox": current_box, "last_seen_frame": frame_count}
-
-        # Рисуем лицо
+    # Между тяжёлыми кадрами только рисуем уже готовые результаты.
+    for face_item in active_faces:
+        top, right, bottom, left = face_item["box"]
         cv2.rectangle(display_frame, (left, top), (right, bottom), (0, 255, 0), 2)
-        cv2.putText(display_frame, name, (left, top - 10),
+        user_id = face_item.get("id")
+        visible_text = "00:00"
+        if user_id and user_id in visibility_stats:
+            stats = visibility_stats[user_id]
+            elapsed_sec = stats["total_sec"]
+            if stats["visible_since"] is not None:
+                elapsed_sec += now_ts - stats["visible_since"]
+            visible_text = format_duration(elapsed_sec)
+        cv2.putText(display_frame, face_item["name"], (left, max(20, top - 10)),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+        cv2.putText(display_frame, f"time {visible_text}", (left, bottom + 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
     # Очищаем слишком старые треки
     stale_ids = [
@@ -372,6 +458,8 @@ while True:
         if selected in known_faces:
             # Удаляем лицо из базы
             del known_faces[selected]
+            if selected in visibility_stats:
+                del visibility_stats[selected]
 
             # Удаляем папку с фото ID
             face_dir = os.path.join(FACES_DIR, selected)
@@ -395,4 +483,11 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+final_ts = time.time()
+for user_id, stats in visibility_stats.items():
+    if stats["visible_since"] is not None:
+        stats["total_sec"] += max(0.0, final_ts - stats["visible_since"])
+        stats["visible_since"] = None
+    log_visibility_event(stats["name"], user_id, "Итог по зоне видимости", stats["total_sec"])
+    print(f"[INFO] ID {user_id} был в зоне видимости {format_duration(stats['total_sec'])}")
 print("[INFO] Завершение. База сохранена.")
