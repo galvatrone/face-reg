@@ -1,0 +1,3 @@
+Visibility zone summary: PiterParker (ID: 247e0526-3b00-4eea-9e25-3bc761a4bcc9)
+Time in visibility zone: 6.5 sec
+--------------------------------------------------------------------------------

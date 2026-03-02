@@ -16,10 +16,10 @@ warnings.filterwarnings(
 
 import face_recognition
 
-# Абсолютный путь к папке проекта
+# Absolute path to the project folder
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Папка с базой и фотографиями
+# Folder with database and photos
 BASE_FILE = os.path.join(PROJECT_DIR, "known_faces.pkl")
 FACES_DIR = os.path.join(PROJECT_DIR, "faces")
 LOGS_DIR = os.path.join(PROJECT_DIR, "logs")
@@ -30,9 +30,9 @@ def log_face_event(name, face_id, encoding, event_text, total_faces):
     per_id_log = os.path.join(LOGS_DIR, f"{face_id}.txt")
     log_lines = [
         f"{event_text}: {name} (ID: {face_id})",
-        "Кодировка:",
+        "Encoding:",
         f"{encoding}",
-        f"Всего ID в базе: {total_faces}",
+        f"Total IDs in database: {total_faces}",
         "-" * 80,
     ]
     log_text = "\n".join(log_lines) + "\n"
@@ -49,7 +49,7 @@ def log_visibility_event(name, face_id, event_text, duration_sec):
     per_id_log = os.path.join(LOGS_DIR, f"{face_id}.txt")
     log_lines = [
         f"{event_text}: {name} (ID: {face_id})",
-        f"Время в зоне видимости: {duration_sec:.1f} сек",
+        f"Time in visibility zone: {duration_sec:.1f} sec",
         "-" * 80,
     ]
     log_text = "\n".join(log_lines) + "\n"
@@ -72,22 +72,22 @@ def format_duration(seconds):
 
 
 
-# Создание папки для фотографий
+# Creating folder for photos
 if not os.path.exists(FACES_DIR):
     os.makedirs(FACES_DIR)
 if not os.path.exists(LOGS_DIR):
     os.makedirs(LOGS_DIR)
 
-# Загрузка базы
+# Loading database
 if os.path.exists(BASE_FILE):
     with open(BASE_FILE, "rb") as f:
         known_faces = pickle.load(f)
-    print(f"[INFO] Загружено {len(known_faces)} ID.")
+    print(f"[INFO] Loaded {len(known_faces)} IDs.")
 else:
     known_faces = {}
-    print("[INFO] База не найдена. Создаём новую.")
+    print("[INFO] Database not found. Creating new one.")
 
-# Утилита
+# Utility
 def build_encodings_dict(face_dict):
     encodings, ids, names = [], [], []
     for user_id, data in face_dict.items():
@@ -99,7 +99,7 @@ def build_encodings_dict(face_dict):
 
 known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
 
-# Параметры сопоставления и накопления данных
+# Matching and data accumulation parameters
 FACE_MATCH_THRESHOLD = 0.6
 TRACK_MAX_MISSING_FRAMES = 30
 POSITION_IOU_THRESHOLD = 0.20
@@ -217,7 +217,7 @@ def try_add_encoding_to_existing(user_id, face_encoding, face_img, current_frame
     return True, face_path
 
 
-# Камера
+# Camera
 def open_camera():
     system = platform.system().lower()
     candidates = []
@@ -234,7 +234,7 @@ def open_camera():
     for index, backend in candidates:
         cap_try = cv2.VideoCapture(index) if backend is None else cv2.VideoCapture(index, backend)
         if cap_try.isOpened():
-            print(f"[INFO] Камера открыта: index={index}, backend={backend}")
+            print(f"[INFO] Camera opened: index={index}, backend={backend}")
             return cap_try
         cap_try.release()
 
@@ -243,9 +243,9 @@ def open_camera():
 
 cap = open_camera()
 if cap is None or not cap.isOpened():
-    print("Не удалось открыть камеру (проверьте права доступа к /dev/video* и занятость устройства)")
+    print("Failed to open camera (check access rights to /dev/video* and device availability)")
     exit()
-# Единые настройки потока: нормальная картинка для вывода и меньше лагов.
+# Unified stream settings: normal image for output and fewer lags.
 cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAPTURE_WIDTH)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAPTURE_HEIGHT)
@@ -258,12 +258,12 @@ recent_tracks = {}  # user_id -> {"bbox": (t, r, b, l), "last_seen_frame": int}
 last_encoding_add_frame = {}
 visibility_stats = {}  # user_id -> {"name": str, "total_sec": float, "visible_since": float|None, "last_seen_ts": float}
 
-print("[INFO] Нажми 'q' для выхода, 'w' — редактировать имя, 'd' — удалить лицо.")
+print("[INFO] Press 'q' to exit, 'w' - edit name, 'd' - delete face.")
 
 while True:
     ret, frame = cap.read()
     if not ret:
-        print("Ошибка чтения кадра")
+        print("Frame reading error")
         break
 
 
@@ -271,9 +271,9 @@ while True:
     display_frame = frame.copy()
 
     if frame_count % DETECTION_FRAME_INTERVAL == 0:
-        # Тяжёлую детекцию и сопоставление делаем раз в N кадров.
+        # Heavy detection and matching done every N frames.
         small_frame = cv2.resize(frame, (0, 0), fx=DETECTION_SCALE, fy=DETECTION_SCALE)
-        # dlib ожидает contiguous-массив; срез ::-1 даёт view с отрицательным stride.
+        # dlib expects contiguous array; slice ::-1 gives view with negative stride.
         rgb_small_frame = small_frame[:, :, ::-1].copy()
         face_locations_small = face_recognition.face_locations(rgb_small_frame, model="hog")
         if len(face_locations_small) > MAX_FACES_PER_FRAME:
@@ -293,7 +293,7 @@ while True:
         seen_known_ids_this_frame = set()
 
         for face_encoding, (top, right, bottom, left) in zip(face_encodings_small, face_locations_small):
-            # Масштабируем координаты обратно под исходный кадр.
+            # Scale coordinates back to original frame.
             scale_inv = 1.0 / DETECTION_SCALE
             top = int(top * scale_inv)
             right = int(right * scale_inv)
@@ -319,7 +319,7 @@ while True:
                         name = known_faces[matched_id]["name"]
 
             if matched_id is None:
-                # Если лицо только что пропадало и снова появилось рядом, считаем что это тот же ID.
+                # If face just disappeared and reappeared nearby, consider it the same ID.
                 fallback_id = find_recent_id_by_position(
                     current_box,
                     frame_count,
@@ -342,13 +342,13 @@ while True:
                             known_faces[fallback_id]["name"],
                             fallback_id,
                             face_encoding,
-                            "Дополнен ID",
+                            "ID Supplemented",
                             len(known_faces),
                         )
                         known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
-                        print(f"[INFO] Дополнен ID {fallback_id}: +encoding, фото {added_path}")
+                        print(f"[INFO] ID {fallback_id} supplemented: +encoding, photo {added_path}")
                 else:
-                    print("\n=== ДОБАВЛЕНИЕ НОВОГО ЛИЦА ===")
+                    print("\n=== ADDING NEW FACE ===")
                     new_id = str(uuid.uuid4())
                     known_faces[new_id] = {
                         "name": "Unknown",
@@ -356,9 +356,9 @@ while True:
                     }
                     face_path = save_face_image(new_id, face_img, primary=True)
                     save_base()
-                    log_face_event("Unknown", new_id, face_encoding, "Добавлено лицо", len(known_faces))
+                    log_face_event("Unknown", new_id, face_encoding, "Face Added", len(known_faces))
                     known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
-                    print(f"[INFO] Добавлено новое лицо: {new_id}, фото сохранено как {face_path}")
+                    print(f"[INFO] New face added: {new_id}, photo saved as {face_path}")
                     matched_id = new_id
 
             if matched_id is not None:
@@ -420,7 +420,7 @@ while True:
         cv2.putText(display_frame, f"time {visible_text}", (left, bottom + 24),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-    # Очищаем слишком старые треки
+    # Clean up too old tracks
     stale_ids = [
         user_id for user_id, info in recent_tracks.items()
         if frame_count - info["last_seen_frame"] > TRACK_MAX_MISSING_FRAMES
@@ -428,7 +428,7 @@ while True:
     for user_id in stale_ids:
         del recent_tracks[user_id]
 
-    # Отображаем
+    # Display
     cv2.imshow("Camera", display_frame)
 
     key = cv2.waitKey(1) & 0xFF
@@ -437,49 +437,49 @@ while True:
         break
 
     elif key == ord('w'):
-        print("\n=== РЕДАКТИРОВАНИЕ ИМЕНИ ===")
+        print("\n=== EDIT NAME ===")
         for uid in known_faces:
             print(f"{uid}: {known_faces[uid]['name']}")
-        selected = input("Введите ID для переименования: ").strip()
+        selected = input("Enter ID to rename: ").strip()
         if selected in known_faces:
-            new_name = input("Введите новое имя: ").strip()
+            new_name = input("Enter new name: ").strip()
             known_faces[selected]["name"] = new_name
             save_base()
             
-            print(f"[INFO] Имя для {selected} обновлено на {new_name}")
+            print(f"[INFO] Name for {selected} updated to {new_name}")
         else:
-            print("[WARN] Неверный ID")
+            print("[WARN] Invalid ID")
 
     elif key == ord('d'):
-        print("\n=== УДАЛЕНИЕ ЛИЦА ===")
+        print("\n=== DELETE FACE ===")
         for uid in known_faces:
             print(f"{uid}: {known_faces[uid]['name']}")
-        selected = input("Введите ID для удаления: ").strip()
+        selected = input("Enter ID to delete: ").strip()
         if selected in known_faces:
-            # Удаляем лицо из базы
+            # Delete face from database
             del known_faces[selected]
             if selected in visibility_stats:
                 del visibility_stats[selected]
 
-            # Удаляем папку с фото ID
+            # Delete folder with ID photos
             face_dir = os.path.join(FACES_DIR, selected)
             if os.path.isdir(face_dir):
                 shutil.rmtree(face_dir)
-                print(f"[INFO] Папка фото удалена: {face_dir}")
+                print(f"[INFO] Photo folder deleted: {face_dir}")
 
-            # Удаляем отдельный лог ID
+            # Delete separate ID log
             per_id_log = os.path.join(LOGS_DIR, f"{selected}.txt")
             if os.path.exists(per_id_log):
                 os.remove(per_id_log)
-                print(f"[INFO] Лог ID удалён: {per_id_log}")
+                print(f"[INFO] ID log deleted: {per_id_log}")
 
             save_base()
-            print(f"[INFO] Лицо с ID {selected} удалено.")
+            print(f"[INFO] Face with ID {selected} deleted.")
 
-            # Перестроим вспомогательные списки
+            # Rebuild helper lists
             known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
         else:
-            print("[WARN] Неверный ID")
+            print("[WARN] Invalid ID")
 
 cap.release()
 cv2.destroyAllWindows()
@@ -488,6 +488,6 @@ for user_id, stats in visibility_stats.items():
     if stats["visible_since"] is not None:
         stats["total_sec"] += max(0.0, final_ts - stats["visible_since"])
         stats["visible_since"] = None
-    log_visibility_event(stats["name"], user_id, "Итог по зоне видимости", stats["total_sec"])
-    print(f"[INFO] ID {user_id} был в зоне видимости {format_duration(stats['total_sec'])}")
-print("[INFO] Завершение. База сохранена.")
+    log_visibility_event(stats["name"], user_id, "Visibility zone summary", stats["total_sec"])
+    print(f"[INFO] ID {user_id} was in visibility zone {format_duration(stats['total_sec'])}")
+print("[INFO] Completion. Database saved.")
