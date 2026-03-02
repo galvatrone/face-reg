@@ -1828,3 +1828,9 @@ Time in visibility zone: 667.3 sec
 Visibility zone summary: Andri (ID: 4f173592-d0fe-4f30-973e-29a5c962f787)
 Time in visibility zone: 101.6 sec
 --------------------------------------------------------------------------------
+Visibility zone summary: Misha (ID: U0001)
+Time in visibility zone: 124.7 sec
+--------------------------------------------------------------------------------
+Visibility zone summary: Andri (ID: 4f173592-d0fe-4f30-973e-29a5c962f787)
+Time in visibility zone: 14.4 sec
+--------------------------------------------------------------------------------

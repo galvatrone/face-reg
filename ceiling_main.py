@@ -105,23 +105,23 @@ POSITION_IOU_THRESHOLD = 0.20
 POSITION_CENTER_RATIO_THRESHOLD = 0.45
 ENCODING_ADD_MIN_DISTANCE = 0.035
 ENCODING_ADD_COOLDOWN_FRAMES = 10
-# Added compared with NeurMain_mp.py:
+# Added compared with main.py:
 # this ceiling-distance profile spends more CPU on larger faces and denser scans.
 DETECTION_FRAME_INTERVAL = 2
 DETECTION_SCALE = 0.45
 MAX_FACES_PER_FRAME = 6
-# Added compared with NeurMain_mp.py:
+# Added compared with main.py:
 # keep visibility active through longer recognition dropouts from a difficult viewpoint.
 VISIBILITY_LOST_TIMEOUT_SEC = 3.0
-# Added compared with NeurMain_mp.py:
+# Added compared with main.py:
 # retain the last known face position for longer when a detection cycle misses.
 TRACK_HOLD_FRAMES = 20
-# Added compared with NeurMain_mp.py:
+# Added compared with main.py:
 # scan a few in-plane rotations and upsample more aggressively for small distant faces.
 DETECTION_UPSAMPLE = 1
 DETECTION_ANGLES = (-18, 0, 18)
 ROTATION_DUPLICATE_IOU = 0.35
-# Added compared with NeurMain_mp.py:
+# Added compared with main.py:
 # request a larger capture size so distant faces occupy more pixels before downscaling.
 CAPTURE_WIDTH = 1920
 CAPTURE_HEIGHT = 1080
@@ -250,7 +250,7 @@ def open_camera():
 
 
 def preprocess_small_frame(frame):
-    # Added compared with NeurMain_mp.py:
+    # Added compared with main.py:
     # boost contrast and edge detail so small distant faces survive downscaling better.
     ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -300,9 +300,9 @@ def map_box_to_original(box, inverse_matrix, width, height):
 
 
 def detection_worker(task_queue, result_queue):
-    # Difference from NeurMain.py:
+    # Difference from low_main.py:
     # face detection/encoding runs in a separate process instead of the main UI loop.
-    # Added compared with NeurMain_mp.py:
+    # Added compared with main.py:
     # this ceiling variant enhances contrast, requests more detail, and scans rotations.
     while True:
         task = task_queue.get()
@@ -369,7 +369,7 @@ def detection_worker(task_queue, result_queue):
 
 
 def drain_latest_result(result_queue):
-    # Difference from NeurMain.py:
+    # Difference from low_main.py:
     # the main process polls completed worker results without blocking frame rendering.
     latest = None
     while True:
@@ -483,7 +483,7 @@ def process_detection_result(result, frame, frame_count, active_faces, recent_tr
 def main():
     global known_encodings, known_ids, known_names
 
-    # Difference from NeurMain.py:
+    # Difference from low_main.py:
     # this variant explicitly prepares the main process for a multi-process pipeline.
     cv2.setNumThreads(os.cpu_count() or 1)
 
@@ -498,7 +498,7 @@ def main():
     cap.set(cv2.CAP_PROP_FPS, CAPTURE_FPS)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    # Difference from NeurMain.py:
+    # Difference from low_main.py:
     # queues and a dedicated worker process replace in-loop synchronous detection.
     task_queue = mp.Queue(maxsize=1)
     result_queue = mp.Queue(maxsize=1)
@@ -529,7 +529,7 @@ def main():
             if latest_result is not None:
                 processed_frame = frame_cache.pop(latest_result["frame_id"], None)
                 if processed_frame is not None:
-                    # Difference from NeurMain.py:
+                    # Difference from low_main.py:
                     # recognition results arrive later and are applied when the worker finishes.
                     active_faces = process_detection_result(
                         latest_result,
@@ -548,7 +548,7 @@ def main():
                 small_frame = cv2.resize(frame, (0, 0), fx=DETECTION_SCALE, fy=DETECTION_SCALE)
                 payload = {"frame_id": frame_count, "small_frame": small_frame}
                 try:
-                    # Difference from NeurMain.py:
+                    # Difference from low_main.py:
                     # only the reduced frame is handed to the worker, while the UI loop keeps running.
                     task_queue.put_nowait(payload)
                     frame_cache[frame_count] = frame.copy()
@@ -679,7 +679,7 @@ def main():
         cap.release()
         cv2.destroyAllWindows()
 
-        # Difference from NeurMain.py:
+        # Difference from low_main.py:
         # the worker must be signaled and joined so the extra process exits cleanly.
         try:
             task_queue.put_nowait(None)
@@ -709,7 +709,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # Difference from NeurMain.py:
+    # Difference from low_main.py:
     # multiprocessing requires an explicit entry-point guard and start method.
     mp.set_start_method("spawn", force=True)
     main()

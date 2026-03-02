@@ -487,3 +487,6 @@ Total IDs in database: 12
 Visibility zone summary: Misha (ID: U0001)
 Time in visibility zone: 1358.0 sec
 --------------------------------------------------------------------------------
+Visibility zone summary: Misha (ID: U0001)
+Time in visibility zone: 124.7 sec
+--------------------------------------------------------------------------------
