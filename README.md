@@ -1,5 +1,7 @@
 # FaceReg
 
+[Russian version / Русская версия](README-ru.md)
+
 FaceReg is an offline Python face recognition project built around `OpenCV` and `face_recognition` (`dlib`).
 It captures frames from a webcam, detects faces, compares them against a local database, and keeps a stable identity for the same person even when recognition briefly becomes noisy.
 
