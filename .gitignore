@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.class
 
 # Distribution / packaging
 build/
@@ -21,12 +22,24 @@ models/
 *.pth
 weights.txt
 
-# Data, images
+# Runtime data, images, face database
 faces/
+foto_p/
+foto_p_result/
+logs/
+ui_frames/
 images/
 sound/
 *.mp4
 *.avi
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.webp
+known_faces.pkl
+*.pkl
+log.txt
 
 # OS files
 .DS_Store

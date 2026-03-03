@@ -7,7 +7,7 @@ import cv2
 import face_recognition
 
 
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE_FILE = os.path.join(PROJECT_DIR, "known_faces.pkl")
 FACES_DIR = os.path.join(PROJECT_DIR, "faces")
 IMPORT_DIR = os.path.join(PROJECT_DIR, "foto_p")

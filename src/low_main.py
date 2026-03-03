@@ -17,7 +17,7 @@ warnings.filterwarnings(
 import face_recognition
 
 # Absolute path to the project folder
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Folder with database and photos
 BASE_FILE = os.path.join(PROJECT_DIR, "known_faces.pkl")

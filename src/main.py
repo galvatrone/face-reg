@@ -19,7 +19,7 @@ warnings.filterwarnings(
 import face_recognition
 
 # Absolute path to the project folder
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Folder with database and photos
 BASE_FILE = os.path.join(PROJECT_DIR, "known_faces.pkl")
@@ -96,6 +96,24 @@ def build_encodings_dict(face_dict):
     return encodings, ids, names
 
 
+def get_next_unknown_name():
+    max_unknown_number = 0
+    for data in known_faces.values():
+        stored_name = data.get("name", "")
+        if stored_name == "Unknown":
+            max_unknown_number = max(max_unknown_number, 1)
+            continue
+
+        if not stored_name.startswith("Unknown "):
+            continue
+
+        suffix = stored_name[len("Unknown ") :].strip()
+        if suffix.isdigit():
+            max_unknown_number = max(max_unknown_number, int(suffix))
+
+    return f"Unknown {max_unknown_number + 1 if max_unknown_number else 1}"
+
+
 known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
 
 # Matching and data accumulation parameters
@@ -119,6 +137,7 @@ TRACK_HOLD_FRAMES = 12
 CAPTURE_WIDTH = 1280
 CAPTURE_HEIGHT = 720
 CAPTURE_FPS = 30
+WORKER_COUNT = max(1, os.cpu_count() or 1)
 
 
 def save_base():
@@ -277,15 +296,15 @@ def detection_worker(task_queue, result_queue):
         )
 
 
-def drain_latest_result(result_queue):
+def drain_pending_results(result_queue):
     # Difference from low_main.py:
     # the main process polls completed worker results without blocking frame rendering.
-    latest = None
+    results = []
     while True:
         try:
-            latest = result_queue.get_nowait()
+            results.append(result_queue.get_nowait())
         except queue.Empty:
-            return latest
+            return results
 
 
 def build_held_faces(frame_count, recent_tracks):
@@ -370,10 +389,11 @@ def process_detection_result(result, frame, frame_count, active_faces, recent_tr
             else:
                 print("\n=== ADDING NEW FACE ===")
                 new_id = str(uuid.uuid4())
-                known_faces[new_id] = {"name": "Unknown", "encodings": [face_encoding]}
+                name = get_next_unknown_name()
+                known_faces[new_id] = {"name": name, "encodings": [face_encoding]}
                 face_path = save_face_image(new_id, face_img, primary=True)
                 save_base()
-                log_face_event("Unknown", new_id, face_encoding, "Face Added", len(known_faces))
+                log_face_event(name, new_id, face_encoding, "Face Added", len(known_faces))
                 known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
                 print(f"[INFO] New face added: {new_id}, photo saved as {face_path}")
                 matched_id = new_id
@@ -408,11 +428,15 @@ def main():
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     # Difference from low_main.py:
-    # queues and a dedicated worker process replace in-loop synchronous detection.
-    task_queue = mp.Queue(maxsize=1)
-    result_queue = mp.Queue(maxsize=1)
-    worker = mp.Process(target=detection_worker, args=(task_queue, result_queue), daemon=True)
-    worker.start()
+    # queues and multiple worker processes replace in-loop synchronous detection.
+    task_queue = mp.Queue(maxsize=WORKER_COUNT)
+    result_queue = mp.Queue(maxsize=WORKER_COUNT * 2)
+    workers = [
+        mp.Process(target=detection_worker, args=(task_queue, result_queue), daemon=True)
+        for _ in range(WORKER_COUNT)
+    ]
+    for worker in workers:
+        worker.start()
 
     frame_count = 0
     active_faces = []
@@ -420,8 +444,9 @@ def main():
     last_encoding_add_frame = {}
     visibility_stats = {}
     frame_cache = {}
-    pending_frame_id = None
+    pending_frame_ids = set()
 
+    print(f"[INFO] Detection workers: {WORKER_COUNT}")
     print("[INFO] Press 'q' to exit, 'w' - edit name, 'd' - delete face.")
 
     try:
@@ -434,26 +459,27 @@ def main():
             frame = cv2.flip(frame, 1)
             display_frame = frame.copy()
 
-            latest_result = drain_latest_result(result_queue)
-            if latest_result is not None:
-                processed_frame = frame_cache.pop(latest_result["frame_id"], None)
-                if processed_frame is not None:
+            pending_results = drain_pending_results(result_queue)
+            if pending_results:
+                for result in pending_results:
+                    processed_frame = frame_cache.pop(result["frame_id"], None)
+                    pending_frame_ids.discard(result["frame_id"])
+                    if processed_frame is None:
+                        continue
                     # Difference from low_main.py:
                     # recognition results arrive later and are applied when the worker finishes.
                     active_faces = process_detection_result(
-                        latest_result,
+                        result,
                         processed_frame,
-                        latest_result["frame_id"],
+                        result["frame_id"],
                         active_faces,
                         recent_tracks,
                         last_encoding_add_frame,
                     )
-                pending_frame_id = None
-                frame_cache.clear()
             elif active_faces and all(face_item.get("held") for face_item in active_faces):
                 active_faces = build_held_faces(frame_count, recent_tracks)
 
-            if frame_count % DETECTION_FRAME_INTERVAL == 0 and pending_frame_id is None:
+            if frame_count % DETECTION_FRAME_INTERVAL == 0 and len(pending_frame_ids) < WORKER_COUNT:
                 small_frame = cv2.resize(frame, (0, 0), fx=DETECTION_SCALE, fy=DETECTION_SCALE)
                 payload = {"frame_id": frame_count, "small_frame": small_frame}
                 try:
@@ -461,7 +487,7 @@ def main():
                     # only the reduced frame is handed to the worker, while the UI loop keeps running.
                     task_queue.put_nowait(payload)
                     frame_cache[frame_count] = frame.copy()
-                    pending_frame_id = frame_count
+                    pending_frame_ids.add(frame_count)
                 except queue.Full:
                     pass
 
@@ -589,23 +615,24 @@ def main():
         cv2.destroyAllWindows()
 
         # Difference from low_main.py:
-        # the worker must be signaled and joined so the extra process exits cleanly.
-        try:
-            task_queue.put_nowait(None)
-        except queue.Full:
-            try:
-                task_queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                task_queue.put_nowait(None)
-            except queue.Full:
-                pass
+        # workers must be signaled and joined so all extra processes exit cleanly.
+        for _ in workers:
+            sent_stop = False
+            while not sent_stop:
+                try:
+                    task_queue.put_nowait(None)
+                    sent_stop = True
+                except queue.Full:
+                    try:
+                        task_queue.get_nowait()
+                    except queue.Empty:
+                        sent_stop = True
 
-        worker.join(timeout=2.0)
-        if worker.is_alive():
-            worker.terminate()
-            worker.join(timeout=1.0)
+        for worker in workers:
+            worker.join(timeout=2.0)
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(timeout=1.0)
 
         final_ts = time.time()
         for user_id, stats in visibility_stats.items():

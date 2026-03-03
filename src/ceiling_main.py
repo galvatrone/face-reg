@@ -19,7 +19,7 @@ warnings.filterwarnings(
 import face_recognition
 
 # Absolute path to the project folder
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Folder with database and photos
 BASE_FILE = os.path.join(PROJECT_DIR, "known_faces.pkl")
@@ -94,6 +94,24 @@ def build_encodings_dict(face_dict):
             ids.append(user_id)
             names.append(data["name"])
     return encodings, ids, names
+
+
+def get_next_unknown_name():
+    max_unknown_number = 0
+    for data in known_faces.values():
+        stored_name = data.get("name", "")
+        if stored_name == "Unknown":
+            max_unknown_number = max(max_unknown_number, 1)
+            continue
+
+        if not stored_name.startswith("Unknown "):
+            continue
+
+        suffix = stored_name[len("Unknown ") :].strip()
+        if suffix.isdigit():
+            max_unknown_number = max(max_unknown_number, int(suffix))
+
+    return f"Unknown {max_unknown_number + 1 if max_unknown_number else 1}"
 
 
 known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
@@ -461,10 +479,11 @@ def process_detection_result(result, frame, frame_count, active_faces, recent_tr
             else:
                 print("\n=== ADDING NEW FACE ===")
                 new_id = str(uuid.uuid4())
-                known_faces[new_id] = {"name": "Unknown", "encodings": [face_encoding]}
+                name = get_next_unknown_name()
+                known_faces[new_id] = {"name": name, "encodings": [face_encoding]}
                 face_path = save_face_image(new_id, face_img, primary=True)
                 save_base()
-                log_face_event("Unknown", new_id, face_encoding, "Face Added", len(known_faces))
+                log_face_event(name, new_id, face_encoding, "Face Added", len(known_faces))
                 known_encodings, known_ids, known_names = build_encodings_dict(known_faces)
                 print(f"[INFO] New face added: {new_id}, photo saved as {face_path}")
                 matched_id = new_id
