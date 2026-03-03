@@ -2,19 +2,27 @@
 
 [Russian version / Русская версия](README-ru.md)
 
-FaceReg is an offline Python face recognition project built around `OpenCV` and `face_recognition` (`dlib`).
-It captures frames from a webcam, detects faces, compares them against a local database, and keeps a stable identity for the same person even when recognition briefly becomes noisy.
+FaceReg is an offline face recognition project built around Python (`OpenCV` + `face_recognition`) with a Java desktop UI for running scripts, viewing the camera preview, and managing the local face database.
 
-The project is focused on practical use:
-- automatic creation of a new UUID for unknown faces
-- saving the first face photo and additional face snapshots
-- gradual accumulation of new encodings for the same person
-- global logging plus a separate log file for each detected ID
-- multiple runtime modes for different hardware and camera angles
+The project is aimed at practical local use:
+- webcam face recognition without cloud services
+- local database in `known_faces.pkl`
+- automatic creation of IDs for unknown faces
+- additional face snapshots and encoding accumulation
+- per-ID logs plus a global log
+- Java UI for launching modes, previewing camera frames, and managing IDs
 
-![FaceReg preview](https://www.oneix.ltd/assets/images/project-single/2-facer-reg.png)
+## What Is Included
 
-## Installation
+- Python recognition modes in `src/`
+- Java Swing UI in `UI/`
+- batch photo import
+- duplicate encoding cleanup
+- merge / rename / delete utilities for local IDs
+
+## Install
+
+### Python
 
 ```bash
 python3 -m venv venv
@@ -22,138 +30,169 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Run
+### Java
+
+You need a JDK (not only a JRE) to compile and run the UI.
+
+## Quick Start
+
+### Run the Java UI
 
 ```bash
-python low_main.py
-# or
-python main.py
-# or
-python ceiling_main.py
+javac UI/*.java
+java UI.base
 ```
 
-## Program Modes
+The UI can:
+- start and stop Python modes
+- show the `mainJV.py` camera preview inside the window
+- show recent log lines
+- rename, delete, merge, and optimize IDs
 
-### `low_main.py`
+### Run Python Directly
 
-This is the lightest version.
-It is intended for weaker computers, older laptops, or machines with fewer CPU cores.
+```bash
+python src/low_main.py
+# or
+python src/main.py
+# or
+python src/ceiling_main.py
+# or
+python src/mainJV.py
+```
 
-Main characteristics:
-- simplest pipeline
-- lowest CPU usage
-- least aggressive face detection settings
-- best choice when you need the app to keep running with minimal lag
+## Python Modes
 
-Tradeoff:
-- lower accuracy at distance
-- weaker performance on difficult face angles
-- less tolerant to brief recognition failures
+### `src/low_main.py`
 
-Use this mode when:
-- the computer is slow
-- the camera is mostly frontal
-- stability of the UI matters more than maximum detection quality
+The lightest mode for weaker machines.
 
-### `main.py`
+Use it when:
+- CPU is limited
+- camera angle is simple
+- lower lag matters more than maximum recognition quality
 
-This is the main everyday version.
-It moves heavy face detection and encoding work into a separate process using `multiprocessing`, so the camera window and the main loop stay more responsive.
+### `src/main.py`
 
-Main characteristics:
-- balanced mode between speed and recognition quality
-- lower visible lag than the lightweight single-process version
-- better recovery from short misses thanks to held tracks and visibility timeout
-- good default choice for normal desktop use
+The default balanced mode.
 
-Tradeoff:
-- uses more CPU than `low_main.py`
-- still optimized for more typical camera angles, not the hardest top-down views
+It uses `multiprocessing` so detection and encoding run in separate processes, which keeps the main loop more responsive.
 
-Use this mode when:
-- you have a normal modern CPU
-- you want the best general-purpose version
-- the camera is roughly at face level or only slightly tilted
+Use it when:
+- you want the best general-purpose mode
+- the machine has a normal modern CPU
+- the camera is roughly at face level
 
-### `ceiling_main.py`
+### `src/ceiling_main.py`
 
-This is the heavy angle-tuned version.
-It is designed for more difficult cameras, especially ceiling-mounted or strongly tilted cameras that look down and from the side.
+The heavier mode for difficult camera angles.
 
-Compared with `main.py`, this mode:
-- uses a larger detection scale
-- runs detection more often
-- keeps tracks alive longer through short recognition dropouts
-- uses stronger preprocessing for difficult lighting and smaller faces
-- scans several rotated views of the frame to recover angled faces
-- can request higher camera resolution for distant subjects
-
-Tradeoff:
-- highest CPU usage
-- slower than the other modes
-- more expensive detection pipeline because it processes multiple rotated variants
-
-Use this mode when:
-- the camera is mounted high
-- people appear under an angle
+Use it when:
+- camera is mounted high
 - faces are smaller because of distance
-- accuracy in difficult geometry matters more than speed
+- people appear from top-down or side angles
 
-## Photo Import
+### `src/mainJV.py`
 
-`import_foto_p.py` imports faces from folders of photos into the local database.
+This mode is designed for the Java UI.
 
-How it works:
-- create a folder `foto_p/`
-- inside it, create one subfolder per person
-- the subfolder name becomes the person name
-- every valid photo in that folder is used to build face encodings
+Instead of opening an OpenCV window, it writes:
+- `ui_frames/mainJV_frame.jpg`
+- `ui_frames/mainJV_status.txt`
 
-Example:
+The Java UI reads these files and shows the camera preview inside the application window.
+
+## Java UI
+
+The Java UI lives in `UI/` and is the main desktop control panel.
+
+Main features:
+- start `src/mainJV.py`, `src/main.py`, `src/low_main.py`, `src/ceiling_main.py`
+- run utilities such as photo import and duplicate cleanup
+- show camera preview from `mainJV.py`
+- show recent lines from `log.txt`
+- force-stop Python processes when closing the app
+
+Main UI actions:
+- `Run` — starts the selected Python mode
+- `Stop` — stops the running Python mode and its child worker processes
+- `Optimize` — runs `src/check.py`
+- `Rename` — rename an ID from the database
+- `Delete` — delete an ID and related local files
+- `Merge` — merge a duplicate ID into the original profile using a selection dialog
+- `Close` — shuts down the app and cleans temporary UI files
+
+## Face Database Utilities
+
+### Import Photos
+
+```bash
+python src/import_foto_p.py
+```
+
+Expected input layout:
 
 ```text
 foto_p/
-  Misha/
+  PersonA/
     1.jpg
     2.jpg
-  Alex/
-    a.jpg
-    b.jpg
+  PersonB/
+    photo1.jpg
 ```
 
-Import behavior:
-- if the name does not exist yet, a new UUID is created
-- if the name already exists, the script appends new encodings to the existing person
-- valid photos are copied into `faces/<user_id>/`
-- preview copies with a face box are saved into `foto_p_result/<person_name>/`
-- photos with zero faces or multiple faces are skipped
+What it does:
+- creates a new ID if the person does not exist
+- appends encodings if the person already exists
+- copies accepted images into `faces/<user_id>/`
+- saves boxed previews into `foto_p_result/<person_name>/`
 
-Run:
+### Manage IDs
 
 ```bash
-python import_foto_p.py
+python src/manage_faces.py rename <id> "<new name>"
+python src/manage_faces.py delete <id>
+python src/manage_faces.py merge <duplicate_id> <target_id>
 ```
 
-## Data Layout
+### Optimize Duplicate Encodings
 
-- `known_faces.pkl` — local face database with names and face encodings
-- `faces/<user_id>/` — saved face images for each person
-- `logs/` — per-person log files
-- `log.txt` — global event log
-- `foto_p/` — source folders for batch photo import
-- `foto_p_result/` — annotated import previews with face boxes
+```bash
+python src/check.py
+```
 
-## Controls
+This checks each ID separately and removes very similar duplicate encodings to reduce database size.
 
-During webcam execution:
+## Project Layout
+
+- `UI/` — Java Swing UI
+- `src/` — Python scripts
+- `src/compare_tools/` — comparison tools
+- `known_faces.pkl` — local face database
+- `faces/` — saved face images grouped by ID
+- `logs/` — per-ID logs
+- `log.txt` — global log
+- `foto_p/` — source import photos
+- `foto_p_result/` — processed import previews
+- `ui_frames/` — temporary camera preview files for the Java UI
+
+## Controls During Python Camera Modes
+
+For camera modes that still open an OpenCV window:
 - `q` — quit
 - `w` — rename an ID
-- `d` — delete an ID and related files
+- `d` — delete an ID
 
-## Choosing the Right Mode
+## Important Notes
 
-Use `low_main.py` if the machine is weak and you want the lightest possible load.
+- The face database and photos are local files, not cloud data.
+- Runtime data such as logs, photos, preview frames, and `known_faces.pkl` should not be committed to Git.
+- The provided `.gitignore` is configured to ignore these generated files.
 
-Use `main.py` if you want the best general-purpose version and a good balance between speed and stability.
+## Choosing the Right Workflow
 
-Use `ceiling_main.py` if your camera is mounted high, angled, or looking at people from above and from the side.
+- Use the Java UI if you want one place to run modes and manage the database.
+- Use `src/mainJV.py` if you want the camera inside the Java window.
+- Use `src/main.py` if you want the best general-purpose direct Python mode.
+- Use `src/low_main.py` for lighter CPU usage.
+- Use `src/ceiling_main.py` for difficult angles.
